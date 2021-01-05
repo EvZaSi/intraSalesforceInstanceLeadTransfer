@@ -1,2 +1,12 @@
-# intraSalesforceInstanceLeadTransfer
-A tool built using Lamba functions and S3 storage within AWS to facilitate the transfer and post-processing of Lead data between Salesforce instances
+# intraSalesforce Lead Processing and Transfer
+When working within a larger family organization composed of individual companies, a need for a process will almost certainly arise at some point to bridge the gap between two 'system of record' platforms. Lo and behold, this need arose recently when a declaration was made by Sales that Leads entered into Salesforce under a certain employee count should instead be worked by a seperate sub-company within our parent organization.
+
+While it is doable to transfer leads between Salesforce instances by creating a REST web service on one end and utilize the HTTP and HTTPRequest classes on the other, we tend to favor using AWS for data transfer that requires post-processing as it allows us to keep our Apex codebase more lean.
+
+This repo is broken out into two Python classes - transfer_leads_trigger.py and transfer_leads.py
+
+transfer_leads_trigger.py operates by responding to JSON passed from Salesforce to AWS via an API gateway. If the host can be proved out to be the correct Salesforce production instance and not a Sandbox instance, it creates a JSON file within a specific folder in AWS S3 storage.
+
+transfer_leads.py operates by responding to the creation of a file within that specific folder within AWS S3 storage. This file parses the JSON, performs post-processing such as normalization of string values of fields like 'Industry', and pushes the new values to the secondary Salesforce instance using the simple_salesforce Python library.
+
+You may be wondering - why does the transfer_leads_trigger.py exist when you could just have transfer_leads.py handle the parsing??! What's going on here!? Well, it initially was one and the same. But an issue arose - the connection was being held for too long (in excess of the 10 second limit that Salesforce has for API callouts) and causing an error. For text parsing? Well, not exactly. The connection was held open so long because of the fact that the JSON sent over by Salesforce is currently a list of IDs. transfer_leads.py then queries the original instance with those same leads to receive the necessary values. So you're introducing a query there that can take some time. And then, after post-processing of the information, the leads would need to be inserted into the secondary Salesforce instance. This can take time to both send the data and receive the success or error message. So you add these up and sometimes - not all the time - the overall call takes too long for Salesforce. So we decided that de-coupling the receiving of the file and post-processing of the JSON made the most sense. Since transfer_leads_trigger.py immediately returns a status in JSON, Salesforce was content with the amount of time the API call lasted.
